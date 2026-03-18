@@ -2,7 +2,7 @@
 
 Random chord progression generator. Post-punk edition.
 
-**Live site:** `https://csherm7.github.io/prog-lab/`
+**Live site:** `https://csherm7.github.io/proglab/`
 
 ## Features
 
@@ -26,7 +26,7 @@ Random chord progression generator. Post-punk edition.
 1. Create repo `prog-lab`
 2. Upload `index.html`, `manifest.json`, `sw.js`
 3. Settings → Pages → Deploy from `main` / root
-4. Live at `https://csherm7.github.io/prog-lab/`
+4. Live at `https://csherm7.github.io/proglab/`
 
 ## Icons (optional)
 
