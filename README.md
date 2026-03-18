@@ -1,0 +1,2 @@
+# ProgLab
+Chord Progression Generator
