@@ -124,6 +124,14 @@ input[type=range].bpm-slider::-moz-range-thumb {
   background: var(--dim); flex-shrink: 0; transition: background 0.1s;
 }
 .loop-dot.pulse { background: var(--red); }
+.metro-btn {
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 2px;
+  text-transform: uppercase; background: none; color: var(--mid);
+  border: 1px solid var(--dim); padding: 6px 12px; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s; flex-shrink: 0;
+}
+.metro-btn:hover { color: var(--paper); border-color: var(--paper); }
+.metro-btn.on { color: var(--bg); background: var(--paper); border-color: var(--paper); }
 
 /* ── Progression info ── */
 .prog-info { padding: 28px 0 22px; display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
@@ -229,6 +237,7 @@ footer {
       <button class="sound-opt active" id="opt-synth" onclick="setAudioMode('synth')">Synth</button>
       <button class="sound-opt" id="opt-piano" onclick="setAudioMode('piano')">Piano</button>
     </div>
+    <button class="metro-btn" id="metro-btn" onclick="toggleMetronome()">Metronome</button>
     <div class="loop-dot" id="loop-dot"></div>
   </div>
 
@@ -767,11 +776,32 @@ let playBeat = 0;
 let playLoop = 0;
 let bpm = 90;
 let audioMode = 'synth'; // 'synth' | 'piano'
+let metronomeOn = false;
+let nextChordTime = 0; // AudioContext-clock time for next chord start
 
 function getAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
+}
+
+// ── Metronome click: short sine blip scheduled at precise AudioContext time ──
+function scheduleClick(ctx, time, isDownbeat) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = isDownbeat ? 1100 : 880;
+  g.gain.setValueAtTime(0, time);
+  g.gain.linearRampToValueAtTime(isDownbeat ? 0.28 : 0.18, time + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(time); osc.stop(time + 0.06);
+}
+
+function toggleMetronome() {
+  metronomeOn = !metronomeOn;
+  const btn = document.getElementById('metro-btn');
+  btn.classList.toggle('on', metronomeOn);
 }
 
 function midiFreq(note) { return 440 * Math.pow(2, (note - 69) / 12); }
@@ -913,7 +943,7 @@ function startPlay() {
 }
 
 function stopPlay() {
-  isPlaying = false; playBeat = 0;
+  isPlaying = false; playBeat = 0; nextChordTime = 0;
   clearTimeout(playTimer);
   const btn = document.getElementById('play-btn');
   if (btn) { btn.textContent = '▶ Play'; btn.classList.remove('playing'); }
@@ -923,28 +953,53 @@ function stopPlay() {
 
 function scheduleNextChord() {
   if (!isPlaying || !currentResult) return;
+
   const chords = currentResult.resolvedChords;
   const secPerBeat = 60 / bpm;
-  const chordDur = 8 * secPerBeat;
+  const beatsPerChord = 4;           // 1 bar of 4/4
+  const chordDur = beatsPerChord * secPerBeat;
   const ctx = getAudioCtx();
-  const ch = chords[playBeat];
 
+  // First call: anchor to now. Subsequent calls use the accumulated clock.
+  if (nextChordTime < ctx.currentTime) nextChordTime = ctx.currentTime + 0.02;
+
+  const ch = chords[playBeat];
   const usePwr = currentVibe === 'post-punk' && !ch.isSus;
   const noteClasses = usePwr ? ch.powerNotes : ch.notes;
   const midiNotes = voiceChordMidi(noteClasses, ch.root);
 
-  playChordAudio(ctx, midiNotes, ctx.currentTime, chordDur * 0.92);
+  // Schedule chord audio at exact AudioContext time (no drift)
+  playChordAudio(ctx, midiNotes, nextChordTime, chordDur * 0.92);
 
-  document.querySelectorAll('.chord-card').forEach((c, i) => {
-    c.classList.toggle('active-beat', i === playBeat);
-  });
+  // Schedule metronome clicks for every beat in this chord
+  if (metronomeOn) {
+    for (let b = 0; b < beatsPerChord; b++) {
+      scheduleClick(ctx, nextChordTime + b * secPerBeat, b === 0);
+    }
+  }
 
-  const dot = document.getElementById('loop-dot');
-  if (dot) { dot.classList.add('pulse'); setTimeout(() => dot.classList.remove('pulse'), 120); }
+  // Visual update fired at the right wall-clock moment
+  const visualDelay = Math.max(0, (nextChordTime - ctx.currentTime) * 1000);
+  const capturedBeat = playBeat;
+  setTimeout(() => {
+    document.querySelectorAll('.chord-card').forEach((c, i) => {
+      c.classList.toggle('active-beat', i === capturedBeat);
+    });
+    const dot = document.getElementById('loop-dot');
+    if (dot) {
+      dot.classList.add('pulse');
+      setTimeout(() => { const d = document.getElementById('loop-dot'); if (d) d.classList.remove('pulse'); }, 100);
+    }
+  }, visualDelay);
 
+  // Advance beat pointer
+  nextChordTime += chordDur;
   playBeat++;
   if (playBeat >= chords.length) { playBeat = 0; playLoop++; }
-  playTimer = setTimeout(scheduleNextChord, chordDur * 1000);
+
+  // Wake up slightly before the next chord is due
+  const wakeupDelay = Math.max(0, (nextChordTime - ctx.currentTime - 0.05) * 1000);
+  playTimer = setTimeout(scheduleNextChord, wakeupDelay);
 }
 
 // ═══════════════════════════════════════════════════════════
