@@ -124,6 +124,25 @@ input[type=range].bpm-slider::-moz-range-thumb {
   background: var(--dim); flex-shrink: 0; transition: background 0.1s;
 }
 .loop-dot.pulse { background: var(--red); }
+.vol-control {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-width: 120px;
+}
+.vol-label {
+  font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--mid); white-space: nowrap;
+}
+input[type=range].vol-slider {
+  -webkit-appearance: none; appearance: none; width: 80px; height: 2px;
+  background: var(--dim); outline: none; cursor: pointer;
+}
+input[type=range].vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px;
+  background: var(--paper); border-radius: 0; cursor: pointer;
+}
+input[type=range].vol-slider::-moz-range-thumb {
+  width: 14px; height: 14px; background: var(--paper);
+  border: none; border-radius: 0; cursor: pointer;
+}
 .metro-btn {
   font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 2px;
   text-transform: uppercase; background: none; color: var(--mid);
@@ -236,6 +255,10 @@ footer {
     <div class="sound-toggle">
       <button class="sound-opt active" id="opt-synth" onclick="setAudioMode('synth')">Synth</button>
       <button class="sound-opt" id="opt-piano" onclick="setAudioMode('piano')">Piano</button>
+    </div>
+    <div class="vol-control">
+      <span class="vol-label">Vol</span>
+      <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="75" oninput="onVolChange(this.value)">
     </div>
     <button class="metro-btn" id="metro-btn" onclick="toggleMetronome()">Metronome</button>
     <div class="loop-dot" id="loop-dot"></div>
@@ -778,11 +801,23 @@ let bpm = 90;
 let audioMode = 'synth'; // 'synth' | 'piano'
 let metronomeOn = false;
 let nextChordTime = 0; // AudioContext-clock time for next chord start
+let masterGain = null;
+let volume = 0.75;
 
 function getAudioCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = volume;
+    masterGain.connect(audioCtx.destination);
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
+}
+
+function onVolChange(val) {
+  volume = parseInt(val) / 100;
+  if (masterGain) masterGain.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.01);
 }
 
 // ── Metronome click: short sine blip scheduled at precise AudioContext time ──
@@ -794,7 +829,7 @@ function scheduleClick(ctx, time, isDownbeat) {
   g.gain.setValueAtTime(0, time);
   g.gain.linearRampToValueAtTime(isDownbeat ? 0.28 : 0.18, time + 0.002);
   g.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
-  osc.connect(g); g.connect(ctx.destination);
+  osc.connect(g); g.connect(masterGain || ctx.destination);
   osc.start(time); osc.stop(time + 0.06);
 }
 
@@ -810,7 +845,7 @@ function midiFreq(note) { return 440 * Math.pow(2, (note - 69) / 12); }
 function playNoteSynth(ctx, midiNote, startTime, duration, velocity) {
   const freq = midiFreq(midiNote);
   const master = ctx.createGain();
-  master.connect(ctx.destination);
+  master.connect(masterGain || ctx.destination);
   const atk=0.008, dec=0.18, sus=0.45, rel=0.4, peak=velocity;
   master.gain.setValueAtTime(0, startTime);
   master.gain.linearRampToValueAtTime(peak, startTime+atk);
@@ -841,7 +876,7 @@ function playNotePiano(ctx, midiNote, duration, startTime, velocity) {
   const freq = midiFreq(midiNote);
   const master = ctx.createGain();
   master.gain.value = 1;
-  master.connect(ctx.destination);
+  master.connect(masterGain || ctx.destination);
 
   // Inharmonicity factor (higher notes are more inharmonic on a real piano)
   const B = 0.00015 * Math.pow(freq / 110, 0.6);
