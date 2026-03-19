@@ -2,7 +2,7 @@
 
 Random chord progression generator. Post-punk edition.
 
-**Live site:** `https://csherm7.github.io/proglab/`
+**Live site:** `https://csherm7.github.io/ProgLab/`
 
 ## Features
 
